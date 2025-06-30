@@ -1,11 +1,11 @@
 import 'reflect-metadata';
-import express, { Express, Request, Response, NextFunction } from 'express';
+import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import { initializeDatabase } from './config/database';
+import { AppDataSource } from './config/database';
 import authRoutes from './routes/auth.routes';
 import contentRoutes from './routes/content.routes';
 import { config } from 'dotenv';
@@ -15,13 +15,6 @@ import { AppError } from './utils/errorHandler';
 config();
 
 // Create Express app
-const app: Express = express();
-const PORT = process.env.PORT || 5000;
-
-// Load environment variables
-config();
-
-// Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -29,8 +22,18 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 
 // Enable CORS
+const allowedOrigins = ['http://localhost:3001', 'http://localhost:5001'];
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = `The CORS policy for this site does not allow access from the specified origin: ${origin}`;
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -57,7 +60,7 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(compression());
 
 // Health check route
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/api/health', (req: express.Request, res: express.Response) => {
   res.status(200).json({
     status: 'success',
     message: 'Server is running',
@@ -71,12 +74,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/content', contentRoutes);
 
 // 404 handler
-app.all('*', (req: Request, res: Response, next: NextFunction) => {
+app.all('*', (req: express.Request, res: express.Response, next: express.NextFunction) => {
   next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
 });
 
 // Global error handler
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
@@ -96,7 +99,7 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
       });
     } else {
       // Log the error
-      console.error('ERROR ', err);
+      console.error('ERROR 💥', err);
 
       // Send generic message
       res.status(500).json({
@@ -110,7 +113,9 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 // Initialize database and start server
 const startServer = async () => {
   try {
-    await initializeDatabase();
+    // Initialize the database connection
+    await AppDataSource.initialize();
+    console.log('Database connection established successfully');
     
     const server = app.listen(PORT, () => {
       console.log(`Server is running on http://localhost:${PORT}`);
@@ -119,7 +124,7 @@ const startServer = async () => {
 
     // Handle unhandled promise rejections
     process.on('unhandledRejection', (err: Error) => {
-      console.error('UNHANDLED REJECTION!  Shutting down...');
+      console.error('UNHANDLED REJECTION! 💥 Shutting down...');
       console.error(err.name, err.message);
       server.close(() => {
         process.exit(1);
@@ -128,7 +133,7 @@ const startServer = async () => {
 
     // Handle uncaught exceptions
     process.on('uncaughtException', (err: Error) => {
-      console.error('UNCAUGHT EXCEPTION!  Shutting down...');
+      console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
       console.error(err.name, err.message);
       server.close(() => {
         process.exit(1);
@@ -137,9 +142,9 @@ const startServer = async () => {
 
     // Handle SIGTERM for graceful shutdown
     process.on('SIGTERM', () => {
-      console.log(' SIGTERM RECEIVED. Shutting down gracefully');
+      console.log('👋 SIGTERM RECEIVED. Shutting down gracefully');
       server.close(() => {
-        console.log(' Process terminated!');
+        console.log('💥 Process terminated!');
       });
     });
 
